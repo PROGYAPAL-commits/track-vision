@@ -1,0 +1,14 @@
+{
+  "name": "trackvision-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.3",
+    "ws": "^8.21.3"
+  }
+}

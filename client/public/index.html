@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrackVision | Indian Railways Operations & ETA Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["'Plus Jakarta Sans'", "sans-serif"],
+            mono: ["'JetBrains Mono'", "monospace"],
+          },
+          colors: {
+            ir: {
+              navy: "#0f172a",
+              blue: "#1d4ed8",
+              light: "#f8fafc",
+              border: "#e2e8f0"
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: "Plus Jakarta Sans", sans-serif; background-color: #f1f5f9; color: #0f172a; }
+    .custom-scrollbar::-webkit-scrollbar { height: 5px; width: 5px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    .leaflet-container { background: #e2e8f0 !important; font-family: "Plus Jakarta Sans", sans-serif !important; }
+    .badge-glow-green { box-shadow: 0 0 10px rgba(16, 185, 129, 0.25); }
+    .badge-glow-amber { box-shadow: 0 0 10px rgba(245, 158, 11, 0.25); }
+    .badge-glow-red { box-shadow: 0 0 10px rgba(239, 68, 68, 0.25); }
+  </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden select-none bg-slate-100">
+
+  <!-- TOP ENTERPRISE NAVBAR -->
+  <header class="h-16 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between z-30 shrink-0 shadow-xs">
+    <!-- Brand -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-600/20 font-black tracking-tight text-lg">
+          TV
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-base font-extrabold tracking-tight text-slate-900">TrackVision</span>
+            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">SIH26028</span>
+            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60">Ministry of Railways</span>
+          </div>
+          <p class="text-[11px] text-slate-500 font-medium">Dynamic ETA Forecast Engine • Signal Aspect & Congestion Propagation</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Kpis -->
+    <div class="hidden lg:flex items-center space-x-3">
+      <div class="bg-white px-4 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-3">
+        <div class="w-2 h-2 rounded-full bg-blue-600"></div>
+        <div>
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Trains</div>
+          <div id="metric-total" class="text-sm font-black text-slate-800 leading-tight">4</div>
+        </div>
+      </div>
+      <div class="bg-white px-4 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-3">
+        <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
+        <div>
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">On Schedule</div>
+          <div id="metric-ontime" class="text-sm font-black text-emerald-600 leading-tight">2</div>
+        </div>
+      </div>
+      <div class="bg-white px-4 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-3">
+        <div class="w-2 h-2 rounded-full bg-amber-500"></div>
+        <div>
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Delayed</div>
+          <div id="metric-delayed" class="text-sm font-black text-amber-600 leading-tight">2</div>
+        </div>
+      </div>
+      <div class="bg-white px-4 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex items-center space-x-3">
+        <div class="w-2 h-2 rounded-full bg-rose-500"></div>
+        <div>
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg Delay</div>
+          <div id="metric-avgdelay" class="text-sm font-black text-rose-600 leading-tight">13 min</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex items-center space-x-3">
+      <div class="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span class="text-xs font-bold text-emerald-700">LIVE FEED</span>
+      </div>
+      <div class="bg-slate-100 p-1 rounded-xl border border-slate-200 flex">
+        <button onclick="switchView('control')" id="btn-control" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-white text-blue-700 shadow-2xs">Control Room</button>
+        <button onclick="switchView('passenger')" id="btn-passenger" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900">Passenger View</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTROL ROOM CONTAINER -->
+  <div id="view-control" class="flex-1 flex overflow-hidden p-3 gap-3">
+
+    <!-- LEFT COLUMN: TRAIN ROSTER -->
+    <section class="w-80 bg-white rounded-2xl border border-slate-200/90 flex flex-col shrink-0 shadow-sm overflow-hidden">
+      <div class="p-3.5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-xs font-bold text-slate-800 uppercase tracking-wider">Live Trains Roster</span>
+          <span class="text-[11px] font-semibold text-slate-400 font-mono">4 Total</span>
+        </div>
+        <div class="relative">
+          <input id="train-search" type="text" placeholder="Search train, number, zone..." oninput="renderTrainList()"
+            class="w-full bg-white text-xs text-slate-800 placeholder-slate-400 pl-8 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition" />
+          <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+      </div>
+      <div id="train-list" class="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scrollbar bg-slate-50/20"></div>
+    </section>
+
+    <!-- CENTER COLUMN: MAP & SIMULATION DOCK -->
+    <section class="flex-1 flex flex-col gap-3 min-w-0">
+      <!-- GIS Map Card -->
+      <div class="flex-1 bg-white rounded-2xl border border-slate-200/90 relative overflow-hidden shadow-sm flex flex-col">
+        <!-- Floating Map Legend -->
+        <div class="absolute top-3 left-3 z-[400] bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl px-3 py-2 shadow-sm text-[11px] font-medium text-slate-700 flex items-center space-x-3">
+          <span class="font-bold text-slate-900">Map Legend:</span>
+          <div class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-blue-600"></span><span>Selected</span></div>
+          <div class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Normal</span></div>
+          <div class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Delayed</span></div>
+        </div>
+
+        <div id="map" class="w-full h-full"></div>
+      </div>
+
+      <!-- Live Downstream Signal & Congestion Strip -->
+      <div class="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-sm shrink-0">
+        <div class="flex justify-between items-center mb-2">
+          <div class="flex items-center space-x-2">
+            <span class="w-2 h-2 rounded-full bg-indigo-600"></span>
+            <span class="text-xs font-bold text-slate-900 uppercase tracking-wide">Downstream Section Propagation Strip</span>
+            <span class="text-xs font-semibold text-slate-500">•</span>
+            <span id="strip-train-label" class="text-xs font-bold text-blue-600">12952 Mumbai Rajdhani Express</span>
+          </div>
+          <div class="flex items-center space-x-3 text-[10px] font-bold text-slate-500">
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Green</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> Double-Yellow</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span> Yellow</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500"></span> Red</span>
+          </div>
+        </div>
+        <div id="congestion-strip" class="flex items-center gap-2 overflow-x-auto custom-scrollbar py-1"></div>
+      </div>
+
+      <!-- Simulation Action Deck -->
+      <div class="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-3.5 text-white shadow-sm flex items-center justify-between gap-4 shrink-0">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm">⚡</div>
+          <div>
+            <div class="text-xs font-extrabold uppercase tracking-wide text-amber-300">Test Downstream Re-Forecasting</div>
+            <div class="text-[11px] text-slate-300">Inject unexpected TSR or congestion events to observe real-time graph propagation</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="sim-type" class="bg-slate-800 text-white border border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-xl focus:outline-none focus:border-amber-400">
+            <option value="congestion">Downstream Congestion Spike</option>
+            <option value="tsr">TSR Speed Restriction (30 km/h)</option>
+            <option value="signal">Signal Interlocking: RED / Hold</option>
+            <option value="weather">Dense Fog / Weather Hazard</option>
+          </select>
+          <select id="sim-section" class="bg-slate-800 text-white border border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-xl focus:outline-none focus:border-amber-400">
+            <option value="sec-3">AGC → GWL</option>
+            <option value="sec-6">BPL → ET</option>
+            <option value="sec-10">NK → KYN</option>
+            <option value="sec-11">KYN → BCT</option>
+          </select>
+          <button onclick="injectSimEvent()" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs rounded-xl transition shadow-sm">
+            Trigger Re-Forecast
+          </button>
+          <button onclick="resetSim()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-xl transition border border-slate-600">
+            Reset
+          </button>
+          <button onclick="advanceDaySim()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition border border-indigo-500">
+            Advance Day ⏩
+          </button>
+        </div>
+        <div id="sim-status" class="text-xs text-emerald-400 font-bold">Engine Ready</div>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN: PREDICTION & EXPLAINABILITY -->
+    <aside class="w-96 flex flex-col gap-3 shrink-0 overflow-y-auto custom-scrollbar">
+
+      <!-- Dynamic Prediction Card -->
+      <div class="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-sm">
+        <div class="flex justify-between items-start mb-3">
+          <div>
+            <span class="text-[10px] font-extrabold uppercase tracking-widest text-blue-600">Active Prediction</span>
+            <h2 id="detail-train-name" class="text-base font-extrabold text-slate-900 leading-tight">12952 Mumbai Rajdhani</h2>
+            <p id="detail-route-tag" class="text-xs text-slate-500 font-medium">NDLS → BCT • Day 1 of 2</p>
+          </div>
+          <span id="detail-delay-badge" class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-50 text-amber-700 border border-amber-200 badge-glow-amber">+14 min late</span>
+        </div>
+
+        <!-- Next Station Big Hero Box -->
+        <div class="bg-slate-50 rounded-xl p-3.5 border border-slate-200/80 mb-3.5">
+          <div class="flex justify-between items-baseline mb-1">
+            <span class="text-xs text-slate-500 font-medium">Next Station: <b id="detail-next-stop" class="text-slate-900 text-sm">AGC (Agra Cantt)</b></span>
+            <span class="text-2xl font-black font-mono text-blue-600 tracking-tight" id="detail-eta-time">19:29</span>
+          </div>
+          <div class="flex justify-between items-center text-xs text-slate-500 mb-2">
+            <span>Scheduled: <span class="font-mono font-semibold text-slate-700">19:15</span></span>
+            <span id="detail-margin" class="font-bold text-slate-600 font-mono">±6 min margin</span>
+          </div>
+
+          <!-- Confidence Band Indicator -->
+          <div class="mt-2 pt-2 border-t border-slate-200/60">
+            <div class="flex justify-between text-[11px] font-bold mb-1">
+              <span class="text-slate-600">Confidence Score</span>
+              <span id="detail-confidence-pct" class="text-emerald-700 font-extrabold">88%</span>
+            </div>
+            <div class="h-2 bg-slate-200 rounded-full overflow-hidden">
+              <div id="detail-confidence-bar" class="h-full bg-gradient-to-r from-blue-600 to-emerald-500 rounded-full" style="width: 88%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Explainable Delay Attribution Box -->
+        <div class="bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+          <div class="text-[10px] uppercase font-extrabold tracking-wider text-amber-800 mb-1">Primary Delay Cause:</div>
+          <div id="detail-cause-tag" class="text-xs font-bold text-amber-950 leading-snug">TSR Section 3 (Track Renewal 45 km/h)</div>
+          <p id="detail-cause-sub" class="text-[11px] text-amber-800/90 mt-1">Leading indicator: Speed penalty factored into downstream arrival before GPS lag.</p>
+        </div>
+      </div>
+
+      <!-- Network Delay Causes Breakdown Chart -->
+      <div class="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-sm">
+        <div class="flex justify-between items-center mb-2">
+          <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wide">Network Delay Breakdown</h3>
+          <span class="text-[10px] font-bold text-slate-400">All Trains</span>
+        </div>
+        <div class="h-36">
+          <canvas id="causeChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Multi-Day Re-Anchoring Timeline -->
+      <div class="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-sm flex-1 flex flex-col">
+        <div class="flex justify-between items-center mb-2.5">
+          <div>
+            <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wide">Multi-Day Journey Drift</h3>
+            <p class="text-[10px] text-slate-400 font-medium">Overnight recovery-slack re-anchoring</p>
+          </div>
+          <span class="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">Re-Anchored</span>
+        </div>
+        <div id="multiday-timeline" class="space-y-2 overflow-y-auto flex-1 text-xs custom-scrollbar"></div>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- PASSENGER REFERENCE CLIENT (LIGHT THEME) -->
+  <main id="view-passenger" class="hidden flex-1 bg-slate-100 overflow-y-auto p-8 flex flex-col items-center justify-center">
+    <div class="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-6 shadow-xl space-y-6">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-blue-600 text-white font-black flex items-center justify-center text-sm shadow-sm">TV</div>
+          <div>
+            <h2 class="text-base font-extrabold text-slate-900">TrackVision Passenger</h2>
+            <span class="text-[10px] uppercase font-bold text-blue-600">Dynamic Forecast Reference Client</span>
+          </div>
+        </div>
+        <span class="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold">Live</span>
+      </div>
+
+      <!-- Search Box -->
+      <div class="flex gap-2">
+        <input id="pass-search-input" type="text" value="12952" placeholder="Enter Train Number (e.g. 12952)"
+          class="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500 font-mono font-bold" />
+        <button onclick="passengerSearch()" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition shadow-sm">Track</button>
+      </div>
+
+      <!-- Passenger Hero Card -->
+      <div class="bg-gradient-to-b from-slate-50 to-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
+        <div class="flex justify-between items-start mb-4">
+          <div>
+            <h3 id="pass-train-title" class="text-lg font-black text-slate-900">12952 Mumbai Rajdhani</h3>
+            <p id="pass-route-info" class="text-xs text-slate-500 font-medium">NDLS → BCT</p>
+          </div>
+          <span id="pass-delay-pill" class="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">+14 min delay</span>
+        </div>
+
+        <div class="my-5 bg-white border border-slate-200 rounded-2xl p-5 text-center shadow-xs">
+          <span class="text-xs uppercase text-slate-400 font-bold tracking-wider">Estimated Time of Arrival</span>
+          <div class="text-4xl font-black font-mono text-blue-600 mt-1" id="pass-eta">19:29</div>
+          <div class="text-xs text-slate-600 mt-1 font-semibold" id="pass-confidence-text">±6 min • 88% confidence</div>
+        </div>
+
+        <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5">
+          <div class="flex items-center gap-1.5 text-xs font-bold text-slate-800 mb-1">
+            <span class="text-amber-600">ⓘ</span> Why the delay?
+          </div>
+          <p id="pass-cause-text" class="text-xs text-slate-600 font-medium leading-relaxed">TSR Section 3 (Track Renewal 45 km/h) & downstream congestion.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let trainsData = [];
+    let sectionsData = [];
+    let selectedTrainId = "12952";
+    let mapInstance = null;
+    let mapMarkers = {};
+    let causeChartInstance = null;
+
+    const stationCoords = {
+      "NDLS": [28.6139, 77.2090], "MTJ": [27.4924, 77.6737], "AGC": [27.1767, 78.0081],
+      "GWL": [26.2183, 78.1828], "JHS": [25.4484, 78.5685], "BPL": [23.2599, 77.4126],
+      "ET": [22.6155, 77.7523], "KNW": [21.8243, 76.3527], "BSL": [21.0440, 75.7850],
+      "NK": [19.9975, 73.7898], "KYN": [19.2437, 73.1355], "BCT": [18.9712, 72.8194],
+      "HWH": [22.5839, 88.3428], "KGP": [22.3460, 87.3237], "VSKP": [17.7215, 83.3025],
+      "BZA": [16.5193, 80.6305], "MAS": [13.0827, 80.2707]
+    };
+
+    function initMap() {
+      mapInstance = L.map("map", { zoomControl: false }).setView([22.8, 79.5], 5);
+      
+      // Crisp OpenStreetMap standard vector tiles (100% Free, no API key needed)
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        attribution: "© OpenStreetMap contributors"
+      }).addTo(mapInstance);
+
+      // Render Stations
+      Object.entries(stationCoords).forEach(([code, coord]) => {
+        L.circleMarker(coord, {
+          radius: 5,
+          color: "#475569",
+          fillColor: "#ffffff",
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(mapInstance).bindTooltip(code, {
+          permanent: false,
+          direction: "top",
+          className: "bg-white text-slate-800 font-bold text-xs border border-slate-300 shadow-sm"
+        });
+      });
+    }
+
+    async function fetchData() {
+      try {
+        const [resT, resS, resSum] = await Promise.all([
+          fetch("/api/trains").then(r => r.json()),
+          fetch("/api/sections").then(r => r.json()),
+          fetch("/api/dashboard/summary").then(r => r.json())
+        ]);
+        trainsData = resT;
+        sectionsData = resS;
+
+        document.getElementById("metric-total").innerText = resSum.totalTrains;
+        document.getElementById("metric-ontime").innerText = resSum.onTimeCount;
+        document.getElementById("metric-delayed").innerText = resSum.delayedCount;
+        document.getElementById("metric-avgdelay").innerText = resSum.avgDelay + " min";
+
+        renderTrainList();
+        renderMapTrains();
+        renderDetailPanel();
+        renderCongestionStrip();
+        renderTimeline();
+      } catch (err) {
+        console.error("Fetch err:", err);
+      }
+    }
+
+    function renderTrainList() {
+      const q = document.getElementById("train-search").value.toLowerCase();
+      const listEl = document.getElementById("train-list");
+      listEl.innerHTML = "";
+
+      trainsData.filter(t => t.name.toLowerCase().includes(q) || t.number.includes(q)).forEach(t => {
+        const isSel = t.number === selectedTrainId;
+        const delay = t.currentStatus.currentDelayMinutes;
+        const delayBadge = delay > 10 ? "text-rose-700 bg-rose-50 border-rose-200" : delay > 2 ? "text-amber-700 bg-amber-50 border-amber-200" : "text-emerald-700 bg-emerald-50 border-emerald-200";
+
+        const card = document.createElement("div");
+        card.className = `p-3 rounded-xl border cursor-pointer transition ${isSel ? "bg-blue-50/90 border-blue-500 shadow-sm ring-1 ring-blue-500" : "bg-white border-slate-200 hover:border-slate-300 shadow-2xs"}`;
+        card.onclick = () => { selectedTrainId = t.number; renderTrainList(); renderDetailPanel(); renderCongestionStrip(); renderTimeline(); };
+        card.innerHTML = `
+          <div class="flex justify-between items-start">
+            <span class="font-extrabold text-sm text-slate-900">${t.number}</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border ${delayBadge}">+${delay}m</span>
+          </div>
+          <div class="text-xs text-slate-700 font-bold truncate mt-0.5">${t.name}</div>
+          <div class="text-[11px] text-slate-500 mt-1.5 flex justify-between font-medium">
+            <span>${t.sourceStation} → ${t.destStation}</span>
+            <span class="text-blue-600 font-mono font-bold">Day ${t.currentStatus.dayOfJourney || 1}</span>
+          </div>
+        `;
+        listEl.appendChild(card);
+      });
+    }
+
+    function renderMapTrains() {
+      if (!mapInstance) return;
+      trainsData.forEach(t => {
+        const secIdx = t.currentStatus.currentSectionIndex;
+        const r1 = t.route[secIdx]?.stationCode;
+        const r2 = t.route[secIdx + 1]?.stationCode;
+        const p1 = stationCoords[r1];
+        const p2 = stationCoords[r2];
+        if (!p1 || !p2) return;
+
+        const pos = t.currentStatus.positionInSection || 0.5;
+        const lat = p1[0] + (p2[0] - p1[0]) * pos;
+        const lng = p1[1] + (p2[1] - p1[1]) * pos;
+
+        if (mapMarkers[t.number]) {
+          mapMarkers[t.number].setLatLng([lat, lng]);
+        } else {
+          const m = L.circleMarker([lat, lng], {
+            radius: 8,
+            color: "#ffffff",
+            fillColor: t.number === selectedTrainId ? "#2563eb" : "#f59e0b",
+            fillOpacity: 1,
+            weight: 3
+          }).addTo(mapInstance).bindTooltip(t.number, {
+            permanent: true,
+            direction: "right",
+            className: "bg-white text-slate-900 font-mono text-xs font-bold border border-slate-300 shadow-sm"
+          });
+          m.on("click", () => { selectedTrainId = t.number; renderTrainList(); renderDetailPanel(); renderCongestionStrip(); renderTimeline(); });
+          mapMarkers[t.number] = m;
+        }
+      });
+    }
+
+    function renderDetailPanel() {
+      const train = trainsData.find(t => t.number === selectedTrainId);
+      if (!train) return;
+
+      document.getElementById("detail-train-name").innerText = `${train.number} ${train.name}`;
+      document.getElementById("detail-route-tag").innerText = `${train.sourceStation} → ${train.destStation} • Day ${train.currentStatus.dayOfJourney} of ${train.totalDays}`;
+      document.getElementById("detail-delay-badge").innerText = `+${train.currentStatus.currentDelayMinutes} min delay`;
+
+      const nextP = train.predictions && train.predictions[0];
+      if (nextP) {
+        document.getElementById("detail-next-stop").innerText = nextP.stationCode;
+        document.getElementById("detail-eta-time").innerText = new Date(nextP.predictedETA).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        document.getElementById("detail-margin").innerText = `±${nextP.marginMinutes} min margin`;
+        document.getElementById("detail-confidence-pct").innerText = Math.round(nextP.confidence * 100) + "%";
+        document.getElementById("detail-confidence-bar").style.width = Math.round(nextP.confidence * 100) + "%";
+        document.getElementById("detail-cause-tag").innerText = nextP.primaryCause;
+      }
+      document.getElementById("strip-train-label").innerText = `${train.number} ${train.name}`;
+    }
+
+    function renderCongestionStrip() {
+      const train = trainsData.find(t => t.number === selectedTrainId);
+      const stripEl = document.getElementById("congestion-strip");
+      stripEl.innerHTML = "";
+      if (!train) return;
+
+      for (let i = 0; i < train.route.length - 1; i++) {
+        const sF = train.route[i].stationCode;
+        const sT = train.route[i + 1].stationCode;
+        const sec = sectionsData.find(s => s.fromStation === sF && s.toStation === sT) || { congestionLevel: 0.2, currentSignalAspect: "green" };
+        const isCurrent = train.currentStatus.currentSectionIndex === i;
+
+        const congColor = sec.congestionLevel > 0.6 ? "border-rose-300 bg-rose-50/90 text-rose-900" : sec.congestionLevel > 0.35 ? "border-amber-300 bg-amber-50/90 text-amber-900" : "border-emerald-300 bg-emerald-50/90 text-emerald-900";
+        const signalDot = sec.currentSignalAspect === "red" ? "bg-rose-500" : sec.currentSignalAspect === "yellow" ? "bg-amber-500" : sec.currentSignalAspect === "double-yellow" ? "bg-yellow-400" : "bg-emerald-500";
+
+        const block = document.createElement("div");
+        block.className = `shrink-0 w-36 px-3 py-2 rounded-xl border text-xs flex flex-col justify-between ${congColor} ${isCurrent ? "ring-2 ring-blue-600 shadow-sm" : ""}`;
+        block.innerHTML = `
+          <div class="flex justify-between items-center font-black">
+            <span>${sF} → ${sT}</span>
+            <span class="w-2.5 h-2.5 rounded-full ${signalDot} shadow-xs"></span>
+          </div>
+          <div class="flex justify-between text-[10px] font-bold opacity-80 mt-1">
+            <span>Load: ${Math.round(sec.congestionLevel * 100)}%</span>
+            <span>${isCurrent ? "Occupied" : "Downstream"}</span>
+          </div>
+        `;
+        stripEl.appendChild(block);
+      }
+    }
+
+    function renderTimeline() {
+      const train = trainsData.find(t => t.number === selectedTrainId);
+      const tl = document.getElementById("multiday-timeline");
+      tl.innerHTML = "";
+      if (!train || !train.predictions) return;
+
+      train.predictions.slice(0, 5).forEach(p => {
+        const row = document.createElement("div");
+        row.className = "flex justify-between items-center bg-slate-50 border border-slate-200/80 p-2.5 rounded-xl";
+        row.innerHTML = `
+          <div>
+            <div class="font-extrabold text-slate-800">${p.stationCode}</div>
+            <div class="text-[10px] text-slate-500 font-medium">${p.primaryCause}</div>
+          </div>
+          <div class="text-right">
+            <div class="font-mono text-blue-600 font-bold">${new Date(p.predictedETA).toLocaleTimeString([], {hour: "2-digit", minute:"2-digit"})}</div>
+            <div class="text-[10px] text-emerald-600 font-extrabold">conf: ${Math.round(p.confidence*100)}%</div>
+          </div>
+        `;
+        tl.appendChild(row);
+      });
+    }
+
+    function initChart() {
+      const ctx = document.getElementById("causeChart").getContext("2d");
+      causeChartInstance = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: ["Congestion", "TSR Restrictions", "Weather Alert", "Operational/Crew"],
+          datasets: [{
+            data: [45, 28, 15, 12],
+            backgroundColor: ["#f97316", "#8b5cf6", "#0284c7", "#ec4899"],
+            borderWidth: 2,
+            borderColor: "#ffffff"
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "right", labels: { boxWidth: 10, color: "#475569", font: { size: 10, weight: "700" } } }
+          }
+        }
+      });
+    }
+
+    async function injectSimEvent() {
+      const type = document.getElementById("sim-type").value;
+      const sectionId = document.getElementById("sim-section").value;
+      const status = document.getElementById("sim-status");
+      status.innerText = "Re-forecasting graph...";
+      await fetch("/api/simulate/delay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, sectionId, params: { level: 0.9, maxSpeedKmh: 30 } })
+      });
+      await fetchData();
+      status.innerText = "Propagation live!";
+      setTimeout(() => { status.innerText = "Engine Ready"; }, 3000);
+    }
+
+    async function resetSim() {
+      await fetch("/api/simulate/reset", { method: "POST" });
+      await fetchData();
+    }
+
+    async function advanceDaySim() {
+      await fetch("/api/simulate/advance-day", { method: "POST" });
+      await fetchData();
+    }
+
+    function switchView(view) {
+      if (view === "control") {
+        document.getElementById("view-control").classList.remove("hidden");
+        document.getElementById("view-passenger").classList.add("hidden");
+        document.getElementById("btn-control").className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-white text-blue-700 shadow-2xs";
+        document.getElementById("btn-passenger").className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900";
+      } else {
+        document.getElementById("view-control").classList.add("hidden");
+        document.getElementById("view-passenger").classList.remove("hidden");
+        document.getElementById("btn-control").className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900";
+        document.getElementById("btn-passenger").className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition bg-white text-blue-700 shadow-2xs";
+        passengerSearch();
+      }
+    }
+
+    function passengerSearch() {
+      const q = document.getElementById("pass-search-input").value.trim();
+      const train = trainsData.find(t => t.number === q) || trainsData[0];
+      if (!train) return;
+      document.getElementById("pass-train-title").innerText = `${train.number} ${train.name}`;
+      document.getElementById("pass-route-info").innerText = `${train.sourceStation} → ${train.destStation}`;
+      document.getElementById("pass-delay-pill").innerText = `+${train.currentStatus.currentDelayMinutes}m delay`;
+
+      const p = train.predictions && train.predictions[0];
+      if (p) {
+        document.getElementById("pass-eta").innerText = new Date(p.predictedETA).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        document.getElementById("pass-confidence-text").innerText = `±${p.marginMinutes} min • ${Math.round(p.confidence*100)}% confidence`;
+        document.getElementById("pass-cause-text").innerText = p.primaryCause;
+      }
+    }
+
+    function connectWS() {
+      const ws = new WebSocket(`ws://${location.hostname || "localhost"}:3001`);
+      ws.onmessage = () => { fetchData(); };
+      ws.onclose = () => { setTimeout(connectWS, 4000); };
+    }
+
+    window.onload = () => {
+      initMap();
+      initChart();
+      fetchData();
+      connectWS();
+      setInterval(fetchData, 8000);
+    };
+  </script>
+</body>
+</html>
